@@ -2,14 +2,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#include <math.h>
 #include <stdint.h>
 
 #define TRUE 1
 #define FALSE 0
 
-int pid = 0;
-int is_defined = FALSE;
+#define NUM_PROCESSES 4
+
+typedef struct _page_table_entry {
+    int PFN;
+    int PID;
+    int valid;
+} _page_table_entry;
 
 // Output file
 FILE* output_file;
@@ -37,22 +41,12 @@ char** tokenize_input(char* input) {
     return tokens;
 }
 
-uint32_t *mydefine(int off, int pfn, int vpn) {
-    fprintf(output_file, "Current PID: %d. Memory instantiation complete. OFF bits: %d. PFN bits: %d. VPN bits: %d\n",
-        pid,
-        off,
-        pfn,
-        vpn
-    );
-    return (uint32_t *)calloc(pow(2, off + pfn), sizeof(uint32_t));
-}
-
-void myctxswitch(int newpid) {
-    pid = newpid;
-    fprintf(output_file, "Current PID: %d. Switched execution context to process: %d\n",
-        pid,
-        newpid
-    );
+int mypow(int x, int n) {
+    int total = x;
+    for (int i=0; i<n-1; i++) {
+        total *= x;
+    }
+    return total;
 }
 
 int main(int argc, char* argv[]) {
@@ -74,7 +68,10 @@ int main(int argc, char* argv[]) {
     FILE* input_file = fopen(input_trace, "r");
     output_file = fopen(output_trace, "w");  
 
-    int is_defined = 0;
+    int pid = 0;
+    int is_defined = FALSE;
+    uint32_t *memory;
+    _page_table_entry *page_tables[NUM_PROCESSES];
 
     while ( !feof(input_file) ) {
         // Read input file line by line
@@ -86,36 +83,52 @@ int main(int argc, char* argv[]) {
             // Remove endline character
             buffer[strlen(buffer) - 1] = '\0';
         }
-        char** tokens = tokenize_input(buffer);
+        char** tokens = tokenize_input(buffer)
+        char *instruction = tokens[0];
 
         // TODO: Implement your memory simulator
-        // int point = 1;
-
-        // printf("DEBUG: Point %d\n", point++);
-        if (tokens[0][0] == '%') {
-            // printf("DEBUG: Point %d\n", point++);
+        if (instruction[0] == '%') {
             continue;
         }
 
-        if (strcmp(tokens[0], "define") == 0) {
-            // printf("DEBUG: Point %d\n", point++);
+        if (strcmp(instruction, "define") == 0) {
             if (is_defined) {
                 fprintf(output_file, "Current PID: %d. Error: multiple calls to define in the same trace\n", pid);
                 break;
             }
-            mydefine(atoi(tokens[1]), atoi(tokens[2]), atoi(tokens[3]));
+
+            int offset = atoi(tokens[1]);
+            int pfn = atoi(tokens[2]);
+            int vpn = atoi(tokens[3]);
+            memory = (uint32_t *)calloc(mypow(2, offset + pfn), sizeof(uint32_t));
+
+            int pages_per_process = mypow(2, vpn) / NUM_PROCESSES;
+
+            for (int process_number = 0; process_number < NUM_PROCESSES; process_number++) {
+                page_tables[process_number] = (_page_table_entry *)malloc(pages_per_process * sizeof(_page_table_entry));
+                for (int page = 0; page < pages_per_process; page++) {
+                    page_tables[process_number][page].PFN = 0;
+                    page_tables[process_number][page].PID = process_number;
+                    page_tables[process_number][page].valid = 0;
+                }
+            }
+
+            fprintf(output_file, "Current PID: %d. Memory instantiation complete. OFF bits: %d. PFN bits: %d. VPN bits: %d\n", pid, offset, pfn, vpn);
             is_defined = 1;
         }
-        else if (strcmp(tokens[0], "ctxswitch") == 0) {
+        else if (strcmp(instruction, "ctxswitch") == 0) {
             int newpid = atoi(tokens[1]);
+
             if (newpid < 0 || newpid > 3) {
-                fprintf(output_file, "Current PID: %d. Invalid context switch to process %d\n",
-                    pid,
-                    newpid
-                );
+                fprintf(output_file, "Current PID: %d. Invalid context switch to process %d\n", pid, newpid);
                 break;
             }
-            myctxswitch(newpid);
+
+            pid = newpid;
+            fprintf(output_file, "Current PID: %d. Switched execution context to process: %d\n", pid, newpid);
+        }
+        else if (strcmp(instruction, "map") == 0) {
+            
         }
 
         // Deallocate tokens
